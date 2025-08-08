@@ -12,6 +12,7 @@ Servo servo;
 const int SERVO_PIN = 10;
 const int SERVO_ABIERTO = 90;
 const int SERVO_CERRADO = 0;
+const int ALMACEN_PIN = 12;
 
 const byte ROWS = 4;
 const byte COLS = 4;
@@ -50,6 +51,7 @@ String horaComida = "";
 bool ingresandoNombre = true;
 bool ingresandoHora = false;
 bool esperandoDispensar = false;
+bool mensajeMostrado = false;
 
 const int EEPROM_ADDR_NOMBRE = 0;
 const int EEPROM_MAX_NOMBRE = 15;
@@ -59,6 +61,11 @@ const int EEPROM_USED = EEPROM_ADDR_HORA + 5;
 bool mostrarProximaHora = true;
 unsigned long ultimoCambioMensaje = 0;
 const unsigned long alternarIntervalo = 3000;
+
+bool mostrandoMensaje = false;
+unsigned long tiempoMensaje = 0;
+bool mensajePocaComidaActiva = false;
+
 
 void borrarEEPROM() {
   for (int i = 0; i < EEPROM_USED; i++) {
@@ -99,7 +106,8 @@ void setup() {
   if (!rtc.begin()) {
     lcd.clear();
     lcd.print("RTC no encontrado");
-    while (1);
+    while (1)
+      ;
   }
 
   if (rtc.lostPower()) {
@@ -108,8 +116,7 @@ void setup() {
     delay(2000);
   }
 
-  // Para borrar todo y empezar de nuevo, descomenta esta línea:
-  borrarEEPROM();
+  borrarEEPROM();  // Borra EEPROM al inicio (quitar en uso real)
 
   servo.attach(SERVO_PIN);
   servo.write(SERVO_CERRADO);
@@ -135,6 +142,26 @@ void setup() {
 }
 
 void loop() {
+  DateTime ahora = rtc.now();
+  int horaActual = ahora.hour();
+  int minutoActual = ahora.minute();
+  int estado = digitalRead(ALMACEN_PIN);
+  int horaSet = horaComida.substring(0, 2).toInt();
+  int minutoSet = horaComida.substring(2, 4).toInt();
+
+  // Si está activo el mensaje de poca comida, mantenemos la pantalla fija en ese mensaje
+  if (mensajePocaComidaActiva) {
+    if (millis() - tiempoMensaje >= 30000) {
+      // Terminar mensaje después de 30 seg
+      mensajePocaComidaActiva = false;
+      mensajeMostrado = false;  // Permite volver a mostrar mensaje si se repite
+      lcd.clear();
+      mostrarInfoFinal();
+    }
+    return;
+  }
+
+  // Aquí va la lógica de ingreso de nombre y hora
   if (ingresandoNombre) {
     char key = keypad.getKey();
     if (key != NO_KEY) {
@@ -168,7 +195,6 @@ void loop() {
     if (lastKey != '\0' && millis() - lastKeyPressTime > T9_TIMEOUT) {
       aceptarLetra();
     }
-
   } else if (ingresandoHora) {
     char key = keypad.getKey();
     if (key != NO_KEY) {
@@ -201,18 +227,24 @@ void loop() {
         }
       }
     }
-
   } else if (esperandoDispensar) {
-    DateTime ahora = rtc.now();
-    int horaActual = ahora.hour();
-    int minutoActual = ahora.minute();
+    // Primero revisamos si es hora y hay poca comida
+    if (horaActual == horaSet && minutoActual == minutoSet && estado == LOW && !mensajeMostrado) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Poca comida");
+      lcd.setCursor(0, 1);
+      lcd.print("en almacenamiento");
 
-    int horaSet = horaComida.substring(0, 2).toInt();
-    int minutoSet = horaComida.substring(2, 4).toInt();
+      mensajePocaComidaActiva = true;
+      mensajeMostrado = true;
+      tiempoMensaje = millis();
+      return;
+    }
 
+    // Si no hay problema, continua mostrando info y dispensando comida
     if (millis() - lastUpdate >= updateInterval) {
       lastUpdate = millis();
-
       lcd.setCursor(0, 0);
       lcd.print(nombre);
       lcd.print("      ");
@@ -244,24 +276,39 @@ void loop() {
       }
     }
 
-    if (horaActual == horaSet && minutoActual == minutoSet) {
+    // Dispensar comida si hay comida
+    if (horaActual == horaSet && minutoActual == minutoSet && estado == HIGH && !mensajeMostrado) {
       lcd.clear();
       lcd.print("Dispensando comida");
       lcd.setCursor(0, 1);
       lcd.print(nombre);
 
       servo.write(SERVO_ABIERTO);
-      delay(3000); // Mantener abierto
+      delay(3000);
       servo.write(SERVO_CERRADO);
 
       esperandoDispensar = false;
       lcd.clear();
       lcd.print("Fin del proceso");
       delay(2000);
+      // Agrega esto para limpiar bien y mostrar la info:
       lcd.clear();
+      mostrarInfoFinal();
+
+      // Permite que vuelva a funcionar normalmente
+      esperandoDispensar = true;  // o el estado que quieras para que siga mostrando info
+
+      mensajeMostrado = true;
     }
   }
+
+  // Esto debe estar dentro del loop, no afuera:
+  if (mostrandoMensaje && millis() - tiempoMensaje >= 30000) {
+    lcd.clear();
+    mostrandoMensaje = false;
+  }
 }
+
 
 void aceptarLetra() {
   if (lastKey != '\0') {
