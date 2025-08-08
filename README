@@ -1,0 +1,7 @@
+pin 12 el servo motor
+pin 12 mp3 rx
+pin 11 mp3 tx
+
+
+  // Para borrar todo y empezar de nuevo, descomenta esta línea:
+  borrarEEPROM();
