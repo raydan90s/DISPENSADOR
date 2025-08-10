@@ -476,7 +476,7 @@ void configMenu() {
   String lastDisplay = "";
   
   while (true) {
-    String currentDisplay = "Ajustes: 1Nom 2Tip\n3Tam 4Horas #Salir";
+    String currentDisplay = "Ajustes: 1Nomb 2Tiem\n3Tam 4Horas #Salir";
     
     // Solo actualizar pantalla si hay cambios
     if (currentDisplay != lastDisplay) {
@@ -599,37 +599,77 @@ void loop() {
   }
 
   // --- Estado RUN: mostrar reloj y próximos horarios, y disparar si corresponde ---
+  // --- Estado RUN: mostrar reloj y próximos horarios, y disparar si corresponde ---
   DateTime now = rtc.now();
   int hh = now.hour();
   int mm = now.minute();
 
-  // Mostrar cada 1 segundo
+  // Variables estáticas para controlar la rotación de pantalla
   static unsigned long lastUpdate = 0;
+  static unsigned long lastCycle = 0;
+  static int currentDisplay = 0; // 0 = hora actual, 1-n = comidas
+  static int lastMinute = -1; // Para detectar cambio de minuto
+  
   unsigned long ms = millis();
-  if (ms - lastUpdate >= 1000) {
-    lastUpdate = ms;
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("Hora ");
-    if (hh < 10) lcd.print('0');
-    lcd.print(hh); lcd.print(':');
-    if (mm < 10) lcd.print('0');
-    lcd.print(mm);
-
-    lcd.setCursor(0,1);
-    // Mostrar primer horario o "Ajustes: A"
+  
+  // Cambiar pantalla cada 3 segundos
+  if (ms - lastCycle >= 3000) {
+    lastCycle = ms;
     if (feedCount > 0) {
-      lcd.print("Comidas: ");
-      for (int i=0;i<feedCount && i<2;i++) { // muestra hasta dos por espacio
-        if (feedHour[i] < 10) lcd.print('0');
-        lcd.print(feedHour[i]);
-        lcd.print(':');
-        if (feedMinute[i] < 10) lcd.print('0');
-        lcd.print(feedMinute[i]);
-        if (i==0 && feedCount>1) lcd.print(' ');
+      currentDisplay++;
+      if (currentDisplay > feedCount) {
+        currentDisplay = 0; // Volver a mostrar hora
       }
     } else {
-      lcd.print("Ajustes: A");
+      currentDisplay = 0; // Solo hora si no hay comidas
+    }
+  }
+  
+  // Actualizar pantalla solo cuando:
+  // - Cambiamos de pantalla (recién rotamos)
+  // - Estamos en hora y cambió el minuto
+  bool shouldUpdate = false;
+  
+  if (ms - lastCycle < 100) { 
+    // Acabamos de cambiar pantalla
+    shouldUpdate = true;
+    if (currentDisplay == 0) {
+      lastMinute = mm; // Actualizar referencia de minuto
+    }
+  } else if (currentDisplay == 0 && mm != lastMinute) {
+    // Estamos en modo hora y cambió el minuto
+    shouldUpdate = true;
+    lastMinute = mm;
+  }
+  
+  if (shouldUpdate) {
+    lcd.clear();
+    
+    // Primera línea: siempre el nombre de la mascota
+    lcd.setCursor(0,0);
+    lcd.print(petName);
+    
+    // Segunda línea: hora actual o comida según currentDisplay
+    lcd.setCursor(0,1);
+    if (currentDisplay == 0) {
+      // Mostrar hora actual
+      lcd.print("Hora: ");
+      if (hh < 10) lcd.print('0');
+      lcd.print(hh);
+      lcd.print(':');
+      if (mm < 10) lcd.print('0');
+      lcd.print(mm);
+    } else {
+      // Mostrar comida específica (currentDisplay 1-n corresponde a índice 0-(n-1))
+      int comidaIndex = currentDisplay - 1;
+      lcd.print("Comida ");
+      lcd.print(currentDisplay);
+      lcd.print(": ");
+      if (feedHour[comidaIndex] < 10) lcd.print('0');
+      lcd.print(feedHour[comidaIndex]);
+      lcd.print(':');
+      if (feedMinute[comidaIndex] < 10) lcd.print('0');
+      lcd.print(feedMinute[comidaIndex]);
     }
   }
 
