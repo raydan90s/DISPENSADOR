@@ -83,32 +83,86 @@ int readDigitOption() {
   return -1;
 }
 
-// Lee un carácter para nombre: A-D y 0-9; 0 lo tomamos como espacio
-// * = backspace, # = terminar (se maneja fuera)
-bool appendNameChar(char k) {
-  if ((k >= '0' && k <= '9') || (k >= 'A' && k <= 'D')) {
-    if (petName.length() < 15) {
-      if (k == '0') petName += ' ';
-      else petName += k;
-      return true;
+// Sistema T9/multitap para escritura de texto - A empieza en 1
+char t9map[10][5] = {
+  { ' ', ' ', ' ', ' ', ' ' },  // 0 = espacio
+  { 'A', 'B', 'C', ' ', ' ' },  // 1
+  { 'D', 'E', 'F', ' ', ' ' },  // 2  
+  { 'G', 'H', 'I', ' ', ' ' },  // 3
+  { 'J', 'K', 'L', ' ', ' ' },  // 4
+  { 'M', 'N', 'O', ' ', ' ' },  // 5
+  { 'P', 'Q', 'R', 'S', ' ' },  // 6
+  { 'T', 'U', 'V', ' ', ' ' },  // 7
+  { 'W', 'X', 'Y', 'Z', ' ' },  // 8
+  { '9', ' ', ' ', ' ', ' ' }    // 9 solo número
+};
+
+// Variables para multitap
+char currentKey = 0;
+int currentIndex = 0;
+unsigned long lastKeyTime = 0;
+const unsigned long MULTITAP_TIMEOUT = 1000; // 1 segundo timeout
+
+char getMultitapChar(char key) {
+  if (key >= '0' && key <= '9') {
+    int keyNum = key - '0';
+    
+    // Contar caracteres válidos en esta tecla
+    int letterCount = 0;
+    for (int i = 0; i < 5; i++) {
+      if (t9map[keyNum][i] != ' ') letterCount++;
+      else break;
     }
+    
+    if (letterCount == 0) return 0; // Tecla sin letras
+    
+    unsigned long now = millis();
+    
+    if (key == currentKey && (now - lastKeyTime) < MULTITAP_TIMEOUT) {
+      // Misma tecla presionada dentro del timeout - avanzar al siguiente caracter
+      currentIndex = (currentIndex + 1) % letterCount;
+    } else {
+      // Nueva tecla o timeout - empezar desde el primer caracter
+      currentKey = key;
+      currentIndex = 0;
+    }
+    
+    lastKeyTime = now;
+    return t9map[keyNum][currentIndex];
   }
+  return 0;
+}
+
+void resetMultitap() {
+  currentKey = 0;
+  currentIndex = 0;
+  lastKeyTime = 0;
+}
+
+bool appendNameChar(char k) {
+  // Esta función ya no se usa, la lógica está en promptName()
   return false;
 }
 
-// Pide un número entre minV y maxV, mostrando prompt en la primera línea.
-// Se confirma con '#'. '*' borra.
 int promptNumber(const char* prompt, int minV, int maxV) {
   String buf = "";
+  String lastDisplay = ""; // Para evitar reescribir innecesariamente
+  
   while (true) {
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print(prompt);
-    lcd.setCursor(0,1);
-    lcd.print(buf);
+    // Solo actualizar pantalla si hay cambios
+    String currentDisplay = String(prompt) + "\n" + buf;
+    if (currentDisplay != lastDisplay) {
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print(prompt);
+      lcd.setCursor(0,1);
+      lcd.print(buf);
+      lastDisplay = currentDisplay;
+    }
 
     char k = keypad.getKey();
     if (k == NO_KEY) continue;
+    
     if (k >= '0' && k <= '9') {
       if (buf.length() < 3) { // suficiente para 0-999
         buf += k;
@@ -123,26 +177,35 @@ int promptNumber(const char* prompt, int minV, int maxV) {
       } else {
         lcdTitle("Valor invalido", "Intentar de nuevo");
         delay(1200);
+        lastDisplay = ""; // Forzar refresco
       }
     }
   }
 }
 
-// Pide una hora HHMM validada. Retorna true si OK y coloca h y m.
 bool promptTimeHHMM(int &h, int &m, int idx = -1) {
   String buf = "";
+  String lastDisplay = ""; // Para evitar reescribir innecesariamente
+  
   while (true) {
-    lcd.clear();
-    lcd.setCursor(0,0);
-    if (idx >= 0) {
-      lcd.print("Hora ");
-      lcd.print(idx+1);
-      lcd.print(" (HHMM):");
-    } else {
-      lcd.print("Hora (HHMM):");
+    // Solo actualizar pantalla si hay cambios
+    String promptText = (idx >= 0) ? ("Hora " + String(idx+1) + " (HHMM):") : "Hora (HHMM):";
+    String currentDisplay = promptText + "\n" + buf;
+    
+    if (currentDisplay != lastDisplay) {
+      lcd.clear();
+      lcd.setCursor(0,0);
+      if (idx >= 0) {
+        lcd.print("Hora ");
+        lcd.print(idx+1);
+        lcd.print(" (HHMM):");
+      } else {
+        lcd.print("Hora (HHMM):");
+      }
+      lcd.setCursor(0,1);
+      lcd.print(buf);
+      lastDisplay = currentDisplay;
     }
-    lcd.setCursor(0,1);
-    lcd.print(buf);
 
     char k = keypad.getKey();
     if (k == NO_KEY) continue;
@@ -164,72 +227,196 @@ bool promptTimeHHMM(int &h, int &m, int idx = -1) {
           lcdTitle("Hora invalida!", "HH 0-23, MM 0-59");
           delay(1500);
           buf = "";
+          lastDisplay = ""; // Forzar refresco
         }
       } else {
         lcdTitle("Formato: 4 digitos", "Ej: 0730, 1935");
         delay(1500);
+        lastDisplay = ""; // Forzar refresco
       }
     }
   }
 }
 
-// Pide nombre con keypad: A-D y dígitos; 0 = espacio; * = borrar; # = confirmar
 void promptName() {
   petName = "";
-  lcdTitle("Nombre mascota:", "(A-D,0-9, 0=esp)");
-  delay(1000);
+  resetMultitap();
+  
+  lcd.clear();
+  lcd.print("Ingresa nombre:");
+  lcd.setCursor(0, 1);
+  
   while (true) {
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("Nombre:");
-    lcd.setCursor(0,1);
-    if (petName.length() == 0) lcd.print("_");
-    else lcd.print(petName);
-
     char k = keypad.getKey();
+    
+    // Verificar timeout de multitap y aceptar letra pendiente
+    unsigned long now = millis();
+    if (currentKey != 0 && (now - lastKeyTime) >= MULTITAP_TIMEOUT) {
+      // Aceptar la letra que estaba pendiente
+      petName += t9map[currentKey - '0'][currentIndex];
+      lcd.setCursor(0, 1);
+      lcd.print(petName);
+      resetMultitap();
+    }
+    
     if (k == NO_KEY) continue;
 
     if (k == '#') {
       if (petName.length() > 0) {
+        // Aceptar última letra si estaba en multitap
+        if (currentKey != 0) {
+          petName += t9map[currentKey - '0'][currentIndex];
+          resetMultitap();
+        }
         lcdTitle("Nombre guardado", petName.c_str());
         delay(1200);
         return;
       } else {
         lcdTitle("Nombre vacio", "Intenta de nuevo");
         delay(1000);
+        lcd.clear();
+        lcd.print("Ingresa nombre:");
+        lcd.setCursor(0, 1);
+        lcd.print(petName);
       }
     } else if (k == '*') {
-      if (petName.length() > 0) petName.remove(petName.length()-1);
-    } else {
-      appendNameChar(k); // agrega si es válido
+      if (petName.length() > 0) {
+        petName.remove(petName.length()-1);
+        resetMultitap();
+        lcd.clear();
+        lcd.print("Ingresa nombre:");
+        lcd.setCursor(0, 1);
+        lcd.print(petName);
+      }
+    } else if (k >= '0' && k <= '9') {
+      if (k >= '1' && k <= '8') { // Solo teclas con letras
+        if (k == currentKey && (now - lastKeyTime) < MULTITAP_TIMEOUT) {
+          // Misma tecla - ciclar al siguiente caracter
+          int keyNum = k - '0';
+          int letterCount = 0;
+          for (int i = 0; i < 5; i++) {
+            if (t9map[keyNum][i] != ' ') letterCount++;
+            else break;
+          }
+          currentIndex = (currentIndex + 1) % letterCount;
+        } else {
+          // Nueva tecla - aceptar letra anterior si había
+          if (currentKey != 0) {
+            petName += t9map[currentKey - '0'][currentIndex];
+          }
+          currentKey = k;
+          currentIndex = 0;
+        }
+        
+        lastKeyTime = now;
+        
+        // Mostrar letra temporal
+        if (petName.length() < 15) {
+          lcd.setCursor(0, 1);
+          lcd.print(petName);
+          lcd.print(t9map[k - '0'][currentIndex]);
+        }
+      } else if (k == '0') {
+        // Espacio
+        if (currentKey != 0) {
+          petName += t9map[currentKey - '0'][currentIndex];
+          resetMultitap();
+        }
+        if (petName.length() < 15) {
+          petName += ' ';
+          lcd.setCursor(0, 1);
+          lcd.print(petName);
+        }
+      }
     }
   }
 }
 
-// Pide tipo: 1 perro, 2 gato
+void promptFeeds() {
+  feedCount = promptNumber("Veces que come (1-8)", 1, MAX_FEEDS);
+  
+  // Limpiar pantalla y mostrar mensaje inicial
+  lcdTitle("Guardando horarios...", "");
+  delay(500); // Pausa breve para mostrar el mensaje
+  
+  for (int i = 0; i < feedCount; i++) {
+    int hh, mm;
+    bool ok = promptTimeHHMM(hh, mm, i);
+    
+    if (ok) {
+      feedHour[i] = hh;
+      feedMinute[i] = mm;
+
+      // Mostrar confirmación sin parpadeo
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Guardando...");
+      lcd.setCursor(0, 1);
+      lcd.print("Guardado: ");
+      if (hh < 10) lcd.print('0');
+      lcd.print(hh);
+      lcd.print(':');
+      if (mm < 10) lcd.print('0');
+      lcd.print(mm);
+      delay(900);
+    } else {
+      i--; // Si la hora es inválida, vuelve a intentar
+    }
+  }
+
+  // Mensaje final
+  lcdTitle("Horarios listos", "Presiona A=menu");
+  delay(1200);
+}
+
 void promptType() {
-  while (true) {
-    lcdTitle("Tipo mascota:", "1 Perro 2 Gato");
-    int opt = readDigitOption();
-    if (opt == -1) continue;
+  String lastDisplay = "";
+  int opt = -1;
+  
+  while (opt == -1) {
+    String currentDisplay = "Tipo mascota:\n1 Perro 2 Gato";
+    
+    if (currentDisplay != lastDisplay) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Tipo mascota:");
+      lcd.setCursor(0, 1);
+      lcd.print("1 Perro 2 Gato");
+      lastDisplay = currentDisplay;
+    }
+
+    opt = readDigitOption();
+
     if (opt == 1 || opt == 2) {
       petType = opt;
-      lcdTitle("Tipo guardado", (opt==1)?"Perro":"Gato");
+      lcdTitle("Tipo guardado", (opt == 1) ? "Perro" : "Gato");
       delay(1000);
-      return;
-    } else {
+    } else if (opt != -1) {
       lcdTitle("Opcion invalida", nullptr);
       delay(800);
+      lastDisplay = ""; // Forzar refresco
     }
   }
 }
 
-// Pide tamaño: 1 pequeño, 2 cachorro, 3 adulto
 void promptSize() {
+  String lastDisplay = "";
+  
   while (true) {
-    lcdTitle("Tamano:", "1 Peq 2 Cach 3 Adu");
+    String currentDisplay = "Tamano:\n1 Peq 2 Cach 3 Adu";
+    
+    if (currentDisplay != lastDisplay) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Tamano:");
+      lcd.setCursor(0, 1);
+      lcd.print("1 Peq 2 Cach 3 Adu");
+      lastDisplay = currentDisplay;
+    }
+
     int opt = readDigitOption();
     if (opt == -1) continue;
+
     if (opt >= 1 && opt <= 3) {
       petSize = opt;
       if (opt == 1) lcdTitle("Tamano guardado", "Pequeno");
@@ -240,33 +427,9 @@ void promptSize() {
     } else {
       lcdTitle("Opcion invalida", nullptr);
       delay(800);
+      lastDisplay = ""; // Forzar refresco
     }
   }
-}
-
-// Pide número de veces que come y las horas
-void promptFeeds() {
-  feedCount = promptNumber("Veces que come (1-8)", 1, MAX_FEEDS);
-  for (int i=0;i<feedCount;i++) {
-    int hh, mm;
-    bool ok = promptTimeHHMM(hh, mm, i);
-    if (ok) {
-      feedHour[i] = hh;
-      feedMinute[i] = mm;
-      lcd.clear();
-      lcd.print("Guardado: ");
-      if (hh < 10) lcd.print('0');
-      lcd.print(hh);
-      lcd.print(':');
-      if (mm < 10) lcd.print('0');
-      lcd.print(mm);
-      delay(900);
-    } else {
-      i--; // reintentar
-    }
-  }
-  lcdTitle("Horarios listos", "Presiona A=menu");
-  delay(1200);
 }
 
 // Muestra resumen de config
@@ -308,27 +471,55 @@ void doDispense(bool fromSchedule) {
 }
 
 // Menú de reconfiguración (A)
+// Menú de reconfiguración (A) - VERSIÓN CORREGIDA
 void configMenu() {
+  String lastDisplay = "";
+  
   while (true) {
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("Ajustes: 1Nom 2Tip");
-    lcd.setCursor(0,1);
-    lcd.print("3Tam 4Horas #Salir");
+    String currentDisplay = "Ajustes: 1Nom 2Tip\n3Tam 4Horas #Salir";
+    
+    // Solo actualizar pantalla si hay cambios
+    if (currentDisplay != lastDisplay) {
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Ajustes: 1Nom 2Tip");
+      lcd.setCursor(0,1);
+      lcd.print("3Tam 4Horas #Salir");
+      lastDisplay = currentDisplay;
+    }
+    
     char k = keypad.getKey();
     if (k == NO_KEY) continue;
+    
     if (k == '#') {
       lcdTitle("Saliendo", nullptr);
       delay(600);
       return;
     }
-    if (k == '1') { promptName(); showSummary(); }
-    else if (k == '2') { promptType(); showSummary(); }
-    else if (k == '3') { promptSize(); showSummary(); }
-    else if (k == '4') { promptFeeds(); showSummary(); }
+    if (k == '1') { 
+      promptName(); 
+      showSummary(); 
+      lastDisplay = ""; // Forzar refresco al volver
+    }
+    else if (k == '2') { 
+      promptType(); 
+      showSummary(); 
+      lastDisplay = ""; // Forzar refresco al volver
+    }
+    else if (k == '3') { 
+      promptSize(); 
+      showSummary(); 
+      lastDisplay = ""; // Forzar refresco al volver
+    }
+    else if (k == '4') { 
+      promptFeeds(); 
+      showSummary(); 
+      lastDisplay = ""; // Forzar refresco al volver
+    }
     else {
       lcdTitle("Opcion invalida", nullptr);
       delay(700);
+      lastDisplay = ""; // Forzar refresco después del mensaje de error
     }
   }
 }
