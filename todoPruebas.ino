@@ -15,7 +15,7 @@ const int PIN_SENAL_ENTRADA = 12;  // Sensor de comida (HIGH = hay suficiente)
 const int PIN_D = 13;              // Señal apertura forzada ('D')
 
 // ------------ Keypad ------------
-const byte ROWS = 4;
+const byte ROWS = 4;  
 const byte COLS = 4;
 char keys[ROWS][COLS] = {
   { '1', '2', '3', 'A' },
@@ -238,6 +238,17 @@ bool promptTimeHHMM(int &h, int &m, int idx = -1) {
   }
 }
 
+void reproducirPista(int numero) {
+  Serial.write(0x7E);           // Start byte
+  Serial.write(0xFF);           // Version
+  Serial.write(0x06);           // Length
+  Serial.write(0x03);           // Command: play track by index
+  Serial.write(0x00);           // No feedback
+  Serial.write((numero >> 8) & 0xFF); // High byte
+  Serial.write(numero & 0xFF);        // Low byte
+  Serial.write(0xEF);           // End byte
+}
+
 void promptName() {
   petName = "";
   resetMultitap();
@@ -448,24 +459,46 @@ void showSummary() {
   lcd.print(" veces");
   delay(1500);
 }
-
+void esperarFinPista() {
+  while (true) {
+    if (Serial.available() >= 10) {
+      if (Serial.read() == 0x7E) {
+        byte buffer[9];
+        Serial.readBytes(buffer, 9);
+        if (buffer[2] == 0x3D) { // Código de fin de pista
+          break;
+        }
+      }
+    }
+  }
+}
 // Abre el servo según duración configurada, con chequeo del sensor
 void doDispense(bool fromSchedule) {
   int duration = getDispenseDuration();
-
+  unsigned long tiempoInicio;
+  unsigned long duracionTotal = 60000;
   if (fromSchedule) digitalWrite(PIN_SENAL_SALIDA, HIGH);
   int estado = digitalRead(PIN_SENAL_ENTRADA);  // HIGH = hay comida
 
   if (estado == HIGH) {
+    Serial.begin(9600);
+    delay(1000);
+    reproducirPista(3);
     lcdTitle("Abriendo servo", nullptr);
     servo.write(90);
     delay(duration);
     servo.write(0);
     lcdTitle("Proceso listo", nullptr);
   } else {
-    lcdTitle("Poca comida", "Revisar tolva");
+    tiempoInicio = millis();
+    while (millis() - tiempoInicio < duracionTotal) {
+      lcdTitle("Poca comida", "Revisar tolva");
+      Serial.begin(9600);
+      delay(1000);
+      reproducirPista(1); // Reproduce la pista
+      delay(4000);
+    }
   }
-
   if (fromSchedule) digitalWrite(PIN_SENAL_SALIDA, LOW);
   delay(1200);
 }
