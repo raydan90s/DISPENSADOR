@@ -587,7 +587,7 @@
       lcdTitle("Proceso listo", nullptr);
     } else {
       tiempoInicio = millis();
-      while (millis() - tiempoInicio < duracionTotal) {
+      for(int i = 0; i < 2; i++) {
         lcdTitle("Poca comida", "Revisar tolva");
         Serial.begin(9600);
         delay(1000);
